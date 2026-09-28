@@ -1,0 +1,22 @@
+# Build output
+target/
+out/
+*.class
+
+# Maven wrapper / build caches
+.mvn/wrapper/maven-wrapper.jar
+.mvn/.gradle/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+Thumbs.db
+.DS_Store
