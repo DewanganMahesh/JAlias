@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin>
+  <name>JAlias Maven Plugin</name>
+  <description>Transforms JAlias import aliases into ordinary Java during generate-sources.</description>
+  <groupId>io.jalias</groupId>
+  <artifactId>jalias-maven-plugin</artifactId>
+  <version>0.1.0</version>
+  <goalPrefix>jalias</goalPrefix>
+  <isolatedRealm>false</isolatedRealm>
+  <inheritedByDefault>true</inheritedByDefault>
+  <mojos>
+    <mojo>
+      <goal>transform</goal>
+      <description>Rewrites the sources in the alias directory into ordinary Java, registers the output
+        directory as a compile source root and optionally verifies the generated code.</description>
+      <requiresDependencyResolution>compile</requiresDependencyResolution>
+      <requiresDirectInvocation>false</requiresDirectInvocation>
+      <requiresProject>true</requiresProject>
+      <requiresReports>false</requiresReports>
+      <aggregator>false</aggregator>
+      <requiresOnline>false</requiresOnline>
+      <inheritedByDefault>true</inheritedByDefault>
+      <phase>generate-sources</phase>
+      <implementation>io.jalias.maven.TransformMojo</implementation>
+      <language>java</language>
+      <instantiationStrategy>per-lookup</instantiationStrategy>
+      <executionStrategy>once-per-session</executionStrategy>
+      <threadSafe>true</threadSafe>
+      <parameters>
+        <parameter>
+          <name>sourceDirectory</name>
+          <type>java.io.File</type>
+          <required>false</required>
+          <editable>true</editable>
+          <description>Directory holding the sources that may use alias syntax.</description>
+        </parameter>
+        <parameter>
+          <name>outputDirectory</name>
+          <type>java.io.File</type>
+          <required>false</required>
+          <editable>true</editable>
+          <description>Directory the generated Java is written to.</description>
+        </parameter>
+        <parameter>
+          <name>addSourceRoot</name>
+          <type>boolean</type>
+          <required>false</required>
+          <editable>true</editable>
+          <description>Add the output directory to the compile source roots of the project.</description>
+        </parameter>
+        <parameter>
+          <name>emitAliasComments</name>
+          <type>boolean</type>
+          <required>false</required>
+          <editable>true</editable>
+          <description>Keep the aliased imports in the generated sources as comments.</description>
+        </parameter>
+        <parameter>
+          <name>verify</name>
+          <type>boolean</type>
+          <required>false</required>
+          <editable>true</editable>
+          <description>Compile the generated sources to report errors during generate-sources.</description>
+        </parameter>
+        <parameter>
+          <name>skip</name>
+          <type>boolean</type>
+          <required>false</required>
+          <editable>true</editable>
+          <description>Skip the transformation.</description>
+        </parameter>
+      </parameters>
+      <configuration>
+        <sourceDirectory implementation="java.io.File">${project.basedir}/src/main/jalias</sourceDirectory>
+        <outputDirectory implementation="java.io.File">${project.build.directory}/generated-sources/jalias</outputDirectory>
+        <addSourceRoot implementation="boolean" default-value="true">true</addSourceRoot>
+        <emitAliasComments implementation="boolean" default-value="true">true</emitAliasComments>
+        <verify implementation="boolean" default-value="false">false</verify>
+        <skip implementation="boolean" default-value="false">false</skip>
+      </configuration>
+      <requirements>
+        <requirement>
+          <role>org.apache.maven.project.MavenProject</role>
+          <field-name>project</field-name>
+        </requirement>
+      </requirements>
+    </mojo>
+  </mojos>
+</plugin>

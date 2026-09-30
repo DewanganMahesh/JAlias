@@ -4,6 +4,7 @@ import io.jalias.JAlias;
 import io.jalias.compiler.AliasCompilationRequest;
 import io.jalias.compiler.AliasCompiler;
 import io.jalias.compiler.CompilationResult;
+import io.jalias.compiler.SourceTreeTransformer;
 import io.jalias.compiler.TransformResult;
 import io.jalias.exceptions.JAliasException;
 import io.jalias.model.AliasOptions;
@@ -35,6 +36,10 @@ public final class CliRunner {
             Usage:
               jalias transform [--no-comments] [-o <file|dir>] <source.java ...>
                   Print or write the generated Java source.
+
+              jalias transform --source-dir <dir> [-o <output-dir>] [--no-comments]
+                  Transform a whole source tree into a generated sources directory
+                  (default: target/generated-sources/jalias). This is the mode a build uses.
 
               jalias compile [-d <dir>] [-cp <classpath>] <source.java|dir ...>
                   Compile sources that use alias syntax. Without -d the classes stay in memory.
@@ -96,6 +101,9 @@ public final class CliRunner {
     }
 
     private int transform(Parsed parsed, PrintStream out, PrintStream err) throws IOException {
+        if (parsed.sourceDirectory != null) {
+            return transformTree(parsed, out, err);
+        }
         List<Path> files = collectSources(parsed.sources, err);
         if (files.isEmpty()) {
             err.println("transform needs at least one .java file");
@@ -123,6 +131,24 @@ public final class CliRunner {
                 }
                 out.println("// " + result.summary());
             }
+        }
+        return 0;
+    }
+
+    /**
+     * Transforms a whole source tree, the mode a build integration uses.
+     */
+    private int transformTree(Parsed parsed, PrintStream out, PrintStream err) throws IOException {
+        Path outputRoot = parsed.output != null
+                ? parsed.output
+                : Path.of("target", "generated-sources", "jalias");
+        SourceTreeTransformer.Result result =
+                new SourceTreeTransformer(parsed.options()).transform(parsed.sourceDirectory, outputRoot);
+
+        out.println(result.summary());
+        for (SourceTreeTransformer.TransformedFile file : result.withAliases()) {
+            out.println("  " + file.source().getFileName() + " -> " + file.aliases()
+                    + " (" + file.replacements() + " reference(s) rewritten)");
         }
         return 0;
     }
@@ -264,6 +290,7 @@ public final class CliRunner {
         private final List<Path> sources = new ArrayList<>();
         private final List<String> programArgs = new ArrayList<>();
         private Path output;
+        private Path sourceDirectory;
         private String classpath = "";
         private String mainClass;
         private boolean emitComments = true;
@@ -299,6 +326,12 @@ public final class CliRunner {
                     return null;
                 }
                 parsed.classpath = args[i];
+            } else if (arg.equals("-s") || arg.equals("--source-dir")) {
+                if (++i >= args.length) {
+                    err.println(arg + " needs a value");
+                    return null;
+                }
+                parsed.sourceDirectory = Path.of(args[i]);
             } else if (arg.equals("-main") || arg.equals("--main-class")) {
                 if (++i >= args.length) {
                     err.println("-main needs a value");

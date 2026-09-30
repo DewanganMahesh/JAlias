@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CliRunnerTest {
@@ -93,6 +94,33 @@ class CliRunnerTest {
         assertTrue(invocation.out().contains("wrote"), invocation.out());
         String generated = Files.readString(target);
         assertTrue(generated.contains("java.util.Date created = new java.util.Date(0L);"), generated);
+    }
+
+    @Test
+    void transformsWholeSourceTrees(@TempDir Path directory) throws IOException {
+        Path aliasRoot = directory.resolve("src/main/jalias/com/example/app");
+        Files.createDirectories(aliasRoot);
+        Files.writeString(aliasRoot.resolve("App.java"), """
+                package com.example.app;
+
+                import java.util.Date as UtilDate;
+
+                public class App {
+                    public String describe() { return new UtilDate(0L).getClass().getName(); }
+                }
+                """);
+        Path outputRoot = directory.resolve("target/generated-sources/jalias");
+        Invocation invocation = run("transform", "--source-dir", directory.resolve("src/main/jalias").toString(),
+                "-o", outputRoot.toString());
+
+        assertEquals(0, invocation.status(), invocation.err());
+        assertTrue(invocation.out().contains("transformed 1 file(s)"), invocation.out());
+        assertTrue(invocation.out().contains("UtilDate=java.util.Date"), invocation.out());
+
+        String generated = Files.readString(outputRoot.resolve("com/example/app/App.java"));
+        assertTrue(generated.contains("new java.util.Date(0L).getClass().getName()"), generated);
+        assertTrue(generated.lines().filter(line -> !line.stripLeading().startsWith("//"))
+                .noneMatch(line -> line.contains(" as ")), generated);
     }
 
     @Test

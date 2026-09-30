@@ -254,6 +254,118 @@ classes directly.
 The same technique works for two application classes called `Bar` in different packages; see
 [`examples/same-simple-name`](examples/same-simple-name).
 
+## Using JAlias in a Maven project (including Spring Boot)
+
+**The jar on its own is not enough.** `javac` has no `as` clause, so a file that still contains
+`import com.foo.Bar as FooBar;` fails with `';' expected` - in Maven, in Gradle and in the IDE. That error
+is the compiler rejecting the syntax, not the library failing: a build step has to run JAlias *before* the
+compiler does.
+
+### The Maven plugin (recommended)
+
+Keep the files that use alias syntax outside the compiled source directory, by convention in
+`src/main/jalias`, and let the plugin transform them during `generate-sources`:
+
+```xml
+<dependency>
+  <groupId>io.jalias</groupId>
+  <artifactId>jalias</artifactId>
+  <version>0.1.0</version>
+</dependency>
+
+<build>
+  <plugins>
+    <plugin>
+      <groupId>io.jalias</groupId>
+      <artifactId>jalias-maven-plugin</artifactId>
+      <version>0.1.0</version>
+      <executions>
+        <execution>
+          <goals>
+            <goal>transform</goal>
+          </goals>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+```
+
+```
+src/main/java/com/example/demo/App.java        <- ordinary Java, uses the generated class
+src/main/jalias/com/example/demo/Aliased.java  <- uses "import java.util.Date as UtilDate;"
+```
+
+`mvn compile`, `mvn package` and `mvn spring-boot:repackage` then work unchanged: the goal runs in
+`generate-sources`, writes `target/generated-sources/jalias/com/example/demo/Aliased.java` and registers
+that directory as a compile source root, so `javac` never sees an `as` line:
+
+```
+[INFO] --- jalias:0.1.0:transform (default) @ jalias-demo ---
+[INFO] JAlias transformed 1 file(s), 1 of them using aliases {UtilDate=java.util.Date, SqlDate=java.sql.Date} -> target/generated-sources/jalias
+[INFO]   AliasedReport.java -> {UtilDate=java.util.Date, SqlDate=java.sql.Date} (4 reference(s) rewritten)
+[INFO] --- compiler:3.14.1:compile (default-compile) @ jalias-demo ---
+[INFO] Compiling 2 source files with javac [debug release 21] to target\classes
+[INFO] BUILD SUCCESS
+```
+
+Goal parameters:
+
+| Parameter | Property | Default | Meaning |
+|---|---|---|---|
+| `sourceDirectory` | `jalias.sourceDirectory` | `${project.basedir}/src/main/jalias` | where the alias sources live |
+| `outputDirectory` | `jalias.outputDirectory` | `${project.build.directory}/generated-sources/jalias` | where the generated Java is written |
+| `addSourceRoot` | `jalias.addSourceRoot` | `true` | register the output directory as a compile source root |
+| `emitAliasComments` | `jalias.emitAliasComments` | `true` | keep the aliased imports in the generated sources as comments |
+| `verify` | `jalias.verify` | `false` | compile the generated sources during `generate-sources` to fail early |
+| `skip` | `jalias.skip` | `false` | skip the transformation |
+
+If an alias file accidentally stays in a compiled source directory, the plugin stops the build with an
+explanation instead of letting `javac` report the cryptic error:
+
+```
+[ERROR] JAlias: .../src/main/java/com/example/demo/AliasedReport.java uses alias syntax but is inside the
+compiled source root .../src/main/java, so javac sees it and reports "';' expected" on the 'as' line.
+Move the file to .../src/main/jalias (or configure <sourceDirectory>) so that JAlias transforms it before
+the compiler runs.
+```
+
+### The IDE
+
+An editor parses Java with its own compiler, so it will flag every `import x as y;` line - that cannot be
+removed, because the syntax is JAlias' input rather than Java's. The practical setup:
+
+* keep alias sources in `src/main/jalias`, which is outside the module's source roots, so they are not
+  compiled by the IDE (IDEA's Maven import marks only `src/main/java` and
+  `target/generated-sources/jalias` as source roots);
+* read and navigate the *generated* code when you need the real type names - IDEA indexes
+  `target/generated-sources/jalias` automatically;
+* if the IDE still inspects the alias directory, exclude it from inspections
+  (IDEA: *Project Structure → Modules → Sources*, or *Settings → Editor → Inspections*).
+
+### Gradle and other build tools
+
+Use the CLI in a task that runs before `compileJava`, or call the library API. The tree mode of the CLI
+mirrors the Maven plugin:
+
+```bash
+java -cp jalias-0.1.0.jar io.jalias.cli.JAliasCli transform \
+     --source-dir src/main/jalias --output-dir build/generated-sources/jalias
+```
+
+```groovy
+tasks.register('transformAliases', JavaExec) {
+    classpath = files('libs/jalias-0.1.0.jar')
+    mainClass = 'io.jalias.cli.JAliasCli'
+    args 'transform', '--source-dir', 'src/main/jalias',
+         '--output-dir', "$buildDir/generated-sources/jalias"
+}
+compileJava.dependsOn transformAliases
+sourceSets.main.java.srcDir "$buildDir/generated-sources/jalias"
+```
+
+Or call `SourceTreeTransformer` / `AliasCompiler` directly from a build script written in Java.
+
 ## How the transformation works
 
 Java cannot parse `import com.foo.Bar as FooBar;`, so JAlias rewrites the source before the compiler
@@ -363,9 +475,14 @@ The exception types are `AliasSyntaxException`, `AliasConflictException`, `Alias
 * **A JDK is required at runtime** to compile alias sources, since the JDK compiler API does the parsing.
 * **Aliases after the first type declaration** are rejected, because Java only allows imports in the
   import section.
-* Build tools other than the JAlias compiler (Maven's own `javac` invocation, IDEs) will not understand
-  alias syntax. Use JAlias' compiler, the CLI or a build step that calls it; the alias syntax is not a
-  language extension that `javac` itself accepts.
+* **A build step is required.** `javac`, Gradle's and Maven's compiler plugins, Spring Boot's build and
+  every IDE parse Java themselves and report `';' expected` on an `as` line; no jar on the classpath can
+  change that. Run the transformation first - the
+  [Maven plugin](#using-jalias-in-a-maven-project-including-spring-boot) or the
+  [CLI tree mode](#gradle-and-other-build-tools) - and let the build compile the generated sources.
+* **The IDE still flags the alias files**, because an editor cannot be taught the syntax by a dependency.
+  Keep them in `src/main/jalias` so they are not compiled, and read the generated code for real type
+  names.
 
 ## Examples
 
@@ -385,20 +502,33 @@ Runnable programs live in [`examples/`](examples) and are executed by the test s
 ## Building and testing
 
 ```bash
-./mvnw clean verify          # compile, run the whole test suite, build the jar
-./mvnw -DskipTests package   # build the jar only
-java -jar target/jalias-0.1.0.jar help   # the command line tool
+./mvnw clean install                        # core library: build, test, install (io.jalias:jalias)
+./mvnw -f jalias-maven-plugin/pom.xml clean install   # Maven plugin (needs the core installed first)
+./mvnw -DskipTests package                  # build the jar only
+java -jar target/jalias-0.1.0.jar help      # the command line tool
 ```
 
-The suite contains unit tests for every layer (parser, resolver, registry, transformer, compiler,
-class loader, CLI) plus integration tests that compile *and execute* sources written with aliases,
-covering the specification's scenarios: one alias, two classes with the same simple name, several
-aliases, fields, parameters, return types, generics, arrays, static members, nested classes,
-constructors, `instanceof`, casts, alias conflicts, missing aliases and plain Java imports continuing
-to work. The examples under `examples/` are compiled and run by the test suite as well.
+The suite contains unit tests for every layer (parser, resolver, registry, transformer, tree
+transformer, compiler, class loader, CLI, Maven plugin) plus integration tests that compile *and execute*
+sources written with aliases, covering the specification's scenarios: one alias, two classes with the
+same simple name, several aliases, fields, parameters, return types, generics, arrays, static members,
+nested classes, constructors, `instanceof`, casts, alias conflicts, missing aliases and plain Java
+imports continuing to work. The examples under `examples/` are compiled and run by the test suite as
+well.
 
 The Maven Wrapper is checked in, so no local Maven installation is needed; the build only needs a JDK
 21+ (`JAVA_HOME`).
+
+Project layout:
+
+```
+pom.xml                     the library (io.jalias:jalias)
+src/main/java/io/jalias     library sources
+src/test/java/io/jalias     unit, integration and example tests
+jalias-maven-plugin/        the Maven plugin (io.jalias:jalias-maven-plugin)
+examples/                   runnable example programs
+README.md, LICENSE, mvnw    documentation, license, Maven wrapper
+```
 
 ## License
 
