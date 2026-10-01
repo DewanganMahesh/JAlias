@@ -78,12 +78,23 @@ public class TransformMojo extends AbstractMojo {
             throw new MojoExecutionException("JAlias: sourceDirectory is not configured");
         }
         Path sourceRoot = sourceDirectory.toPath();
-        if (!sourceRoot.toFile().isDirectory()) {
-            getLog().info("JAlias: no alias sources in " + sourceDirectory + ", nothing to do");
+        boolean aliasRootExists = sourceRoot.toFile().isDirectory();
+
+        if (aliasRootExists) {
+            // a configuration mistake: the alias directory itself is compiled by javac
+            rejectOverlappingSourceRoots(sourceRoot);
+        }
+
+        // a content mistake: files that use alias syntax sitting where javac compiles them. This check runs
+        // even when the alias directory does not exist yet, because that is exactly the situation in which
+        // the build would otherwise only report the cryptic "';' expected".
+        rejectAliasSourcesInCompiledRoots();
+
+        if (!aliasRootExists) {
+            getLog().info("JAlias: no alias sources in " + sourceDirectory + ", nothing to transform"
+                    + " (put the files that use alias syntax there, or configure <sourceDirectory>)");
             return;
         }
-        rejectOverlappingSourceRoots(sourceRoot);
-        rejectAliasSourcesInCompiledRoots();
 
         Path outputRoot = outputDirectory.toPath();
         SourceTreeTransformer.Result result;

@@ -154,6 +154,34 @@ class TransformMojoTest {
     }
 
     @Test
+    void reportsAliasSyntaxInCompiledRootsEvenWhenTheAliasDirectoryIsMissing(@TempDir Path directory)
+            throws Exception {
+        // exactly the situation of a project that has just added the plugin: nothing in src/main/jalias yet
+        Path aliasRoot = directory.resolve("src/main/jalias");
+        Path compiledRoot = directory.resolve("src/main/java");
+        Path misplaced = compiledRoot.resolve("com/example/demo/TestSubject.java");
+        Files.createDirectories(misplaced.getParent());
+        Files.writeString(misplaced, """
+                package com.example.demo;
+
+                import java.util.Date as UtilDate;
+
+                public class TestSubject {
+                    UtilDate createdAt;
+                }
+                """);
+
+        MavenProject project = new MavenProject();
+        project.addCompileSourceRoot(compiledRoot.toString());
+        TransformMojo mojo = mojo(aliasRoot, directory.resolve("target/generated-sources/jalias"), project);
+
+        MojoFailureException failure = assertThrows(MojoFailureException.class, mojo::execute);
+        assertTrue(failure.getMessage().contains("uses alias syntax but is inside the compiled source root"),
+                failure.getMessage());
+        assertTrue(failure.getMessage().contains(aliasRoot.toString()), failure.getMessage());
+    }
+
+    @Test
     void doesNothingWhenThereAreNoAliasSources(@TempDir Path directory) throws Exception {
         Path aliasRoot = directory.resolve("src/main/jalias");
         Path outputRoot = directory.resolve("target/generated-sources/jalias");
